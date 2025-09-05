@@ -1,7 +1,7 @@
 import os
 import json
 import requests
-import google.generativeai as genai # <- Importamos la librería de Gemini
+import google.generativeai as genai
 from flask import Flask, request
 
 app = Flask(__name__)
@@ -10,13 +10,14 @@ app = Flask(__name__)
 ACCESS_TOKEN = os.environ.get('ACCESS_TOKEN')
 PHONE_NUMBER_ID = os.environ.get('PHONE_NUMBER_ID')
 VERIFY_TOKEN = os.environ.get('VERIFY_TOKEN')
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY') # <- Leemos la nueva API Key
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
 # --- Configuramos el cliente de Gemini ---
 try:
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-pro')
-    print("Gemini configurado correctamente.")
+    # --- LA LÍNEA CORREGIDA ESTÁ AQUÍ ---
+    model = genai.GenerativeModel('gemini-2.5-flash-latest')
+    print("Gemini configurado correctamente con el modelo gemini-2.5-flash-latest.")
 except Exception as e:
     print(f"Error al configurar Gemini: {e}")
     model = None
@@ -29,7 +30,6 @@ def get_gemini_response(prompt):
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        # Maneja errores específicos de la API si es necesario
         print(f"Error al generar contenido con Gemini: {e}")
         return "Lo siento, no pude procesar tu solicitud en este momento."
 
@@ -58,8 +58,8 @@ def send_whatsapp_message(to, text):
 
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
+    # El resto del código no necesita cambios
     if request.method == 'GET':
-        # Verificación del webhook (sin cambios)
         if request.args.get('hub.mode') == 'subscribe' and request.args.get('hub.verify_token') == VERIFY_TOKEN:
             return request.args.get('hub.challenge'), 200
         else:
@@ -83,8 +83,6 @@ def webhook():
 
                     print(f"Mensaje de {sender_phone}: '{message_text}'")
 
-                    # --- ¡AQUÍ ESTÁ LA MAGIA! ---
-                    # En lugar del "eco", llamamos a la función de Gemini
                     reply_text = get_gemini_response(message_text)
                     
                     print(f"Respuesta de Gemini: '{reply_text}'")
