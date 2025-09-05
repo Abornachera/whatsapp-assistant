@@ -1,11 +1,15 @@
 import os
 import uuid
 import requests
+import urllib.parse
 from flask import Flask, request
 from sqlalchemy import create_engine, Column, String, Text, DateTime
 from sqlalchemy.orm import sessionmaker, declarative_base
 from datetime import datetime
 import google.generativeai as genai
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+import dateparser
 import pytz
 
 app = Flask(__name__)
@@ -33,11 +37,20 @@ class Conversation(Base):
 
 Base.metadata.create_all(engine)
 
+jobstores = {"default": SQLAlchemyJobStore(url=DATABASE_URL)}
+scheduler = BackgroundScheduler(
+    jobstores=jobstores,
+    timezone=pytz.timezone("America/Bogota"),
+    job_defaults={"misfire_grace_time": 3600}
+)
+scheduler.start()
+
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash")
 
-WHITELIST = {num.strip() for num in os.getenv("WHITELIST", "").split(",") if num.strip()}
-
+WHITELIST = {
+    "573028432451"  # Anderson
+}
 FALLBACK_MESSAGE = "Lo siento, cambié de número, escríbeme al wa.me/573028432451 Gracias."
 
 def send_whatsapp_message(to, text):
@@ -76,6 +89,27 @@ def gemini_reply(user_message, user_id):
         print(f"Error Gemini: {e}")
         return "Ocurrió un problema generando la respuesta."
 
+def parse_and_schedule_reminder(user_id, text):
+    cleaned = text.lower().replace("recuérdame", "").replace("recuerdame", "").strip()
+    parsed_date = dateparser.parse(
+        cleaned,
+        settings={
+            "PREFER_DATES_FROM": "future",
+            "TIMEZONE": "America/Bogota",
+            "RETURN_AS_TIMEZONE_AWARE": True,
+        },
+    )
+    if not parsed_date:
+        return "No puedo almacenar fechas o crear recordatorios."
+    if parsed_date.tzinfo is None:
+        parsed_date = pytz.timezone("America/Bogota").localize(parsed_date)
+    scheduler.add_job(send_whatsapp_message, "date", run_date=parsed_date, args=[user_id, f"¡RECORDATORIO! {cleaned}"])
+    return f"Listo. Te lo recordaré el {parsed_date.strftime('%d/%m %H:%M')}."
+
+def search_youtube(query):
+    q = urllib.parse.quote(query)
+    return f"Aquí tienes los resultados para '{query}':\nhttps://www.youtube.com/results?search_query={q}"
+
 @app.route("/webhook", methods=["GET"])
 def verify_webhook():
     mode = request.args.get("hub.mode")
@@ -101,7 +135,14 @@ def webhook():
                             send_whatsapp_message(user_id, FALLBACK_MESSAGE)
                             continue
 
-                        reply = gemini_reply(body, user_id)
+                        lower = body.lower()
+                        if lower.startswith("recuérdame") or lower.startswith("recuerdame"):
+                            reply = parse_and_schedule_reminder(user_id, body)
+                        elif lower.startswith("youtube") or lower.startswith("busca en youtube"):
+                            query = lower.replace("busca en youtube", "").replace("youtube", "").strip()
+                            reply = search_youtube(query)
+                        else:
+                            reply = gemini_reply(body, user_id)
 
                         save_message(user_id, "user", body)
                         save_message(user_id, "model", reply)
