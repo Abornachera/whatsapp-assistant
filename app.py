@@ -6,24 +6,28 @@ from flask import Flask, request
 
 app = Flask(__name__)
 
-# --- Leemos nuestras credenciales de forma segura ---
+# --- Credenciales (sin cambios) ---
 ACCESS_TOKEN = os.environ.get('ACCESS_TOKEN')
 PHONE_NUMBER_ID = os.environ.get('PHONE_NUMBER_ID')
 VERIFY_TOKEN = os.environ.get('VERIFY_TOKEN')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
-# --- Configuramos el cliente de Gemini ---
+# --- ¡NUEVO! Lista de números de teléfono autorizados ---
+# Añade aquí los números que tendrán permiso para usar el bot.
+# IMPORTANTE: Deben ser strings y empezar con el código de país (ej: 57 para Colombia).
+AUTHORIZED_NUMBERS = {'573028432451'} # Usamos un set para una búsqueda más eficiente
+
+# --- Configuración de Gemini (sin cambios) ---
 try:
     genai.configure(api_key=GEMINI_API_KEY)
-    # --- LA LÍNEA CORREGIDA ESTÁ AQUÍ ---
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
-    print("Gemini configurado correctamente con el modelo gemini-1.5-flash-latest.")
+    print("Gemini configurado correctamente.")
 except Exception as e:
     print(f"Error al configurar Gemini: {e}")
     model = None
 
-# --- Nueva función para obtener la respuesta de Gemini ---
 def get_gemini_response(prompt):
+    # ... (sin cambios)
     if not model:
         return "Error: El modelo de IA no está configurado correctamente."
     try:
@@ -33,8 +37,8 @@ def get_gemini_response(prompt):
         print(f"Error al generar contenido con Gemini: {e}")
         return "Lo siento, no pude procesar tu solicitud en este momento."
 
-# --- La función para enviar mensajes de WhatsApp (sin cambios) ---
 def send_whatsapp_message(to, text):
+    # ... (sin cambios)
     url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
     headers = {
         "Authorization": f"Bearer {ACCESS_TOKEN}",
@@ -58,8 +62,8 @@ def send_whatsapp_message(to, text):
 
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
-    # El resto del código no necesita cambios
     if request.method == 'GET':
+        # ... (sin cambios)
         if request.args.get('hub.mode') == 'subscribe' and request.args.get('hub.verify_token') == VERIFY_TOKEN:
             return request.args.get('hub.challenge'), 200
         else:
@@ -81,13 +85,18 @@ def webhook():
                     sender_phone = message_data['from']
                     message_text = message_data['text']['body']
 
-                    print(f"Mensaje de {sender_phone}: '{message_text}'")
-
-                    reply_text = get_gemini_response(message_text)
-                    
-                    print(f"Respuesta de Gemini: '{reply_text}'")
-                    print(f"Enviando respuesta a {sender_phone}...")
-                    send_whatsapp_message(sender_phone, reply_text)
+                    # --- ¡NUEVO! Lógica de verificación de Whitelist ---
+                    if sender_phone in AUTHORIZED_NUMBERS:
+                        # Si el número está autorizado, procesa con Gemini
+                        print(f"Número autorizado ({sender_phone}) - Mensaje: '{message_text}'")
+                        reply_text = get_gemini_response(message_text)
+                        print(f"Respuesta de Gemini: '{reply_text}'")
+                        send_whatsapp_message(sender_phone, reply_text)
+                    else:
+                        # Si el número NO está autorizado, envía un mensaje genérico
+                        print(f"Número NO AUTORIZADO ({sender_phone}) intentó acceder.")
+                        rejection_message = "Hola. He cambiado de número, por favor contáctame a mi nuevo WhatsApp: https://wa.me/573028432451 Gracias."
+                        send_whatsapp_message(sender_phone, rejection_message)
 
         except Exception as e:
             print(f"Ocurrió un error al procesar el mensaje: {e}")
