@@ -1,16 +1,39 @@
 import os
 import json
-import requests # <- Importamos la nueva librería
+import requests
+import google.generativeai as genai # <- Importamos la librería de Gemini
 from flask import Flask, request
 
 app = Flask(__name__)
 
-# --- Leemos nuestras credenciales desde las variables de entorno de Render ---
+# --- Leemos nuestras credenciales de forma segura ---
 ACCESS_TOKEN = os.environ.get('ACCESS_TOKEN')
 PHONE_NUMBER_ID = os.environ.get('PHONE_NUMBER_ID')
 VERIFY_TOKEN = os.environ.get('VERIFY_TOKEN')
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY') # <- Leemos la nueva API Key
 
-# --- Función para enviar el mensaje de respuesta ---
+# --- Configuramos el cliente de Gemini ---
+try:
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel('gemini-pro')
+    print("Gemini configurado correctamente.")
+except Exception as e:
+    print(f"Error al configurar Gemini: {e}")
+    model = None
+
+# --- Nueva función para obtener la respuesta de Gemini ---
+def get_gemini_response(prompt):
+    if not model:
+        return "Error: El modelo de IA no está configurado correctamente."
+    try:
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        # Maneja errores específicos de la API si es necesario
+        print(f"Error al generar contenido con Gemini: {e}")
+        return "Lo siento, no pude procesar tu solicitud en este momento."
+
+# --- La función para enviar mensajes de WhatsApp (sin cambios) ---
 def send_whatsapp_message(to, text):
     url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
     headers = {
@@ -24,12 +47,11 @@ def send_whatsapp_message(to, text):
     }
     try:
         response = requests.post(url, headers=headers, data=json.dumps(data))
-        response.raise_for_status() # Lanza un error si la petición falló
+        response.raise_for_status()
         print("Respuesta de Meta:", response.json())
         return response.json()
     except requests.exceptions.RequestException as e:
         print(f"Error al enviar mensaje: {e}")
-        # Imprime más detalles si la respuesta tiene contenido
         if e.response is not None:
             print(f"Detalles del error: {e.response.text}")
         return None
@@ -37,6 +59,7 @@ def send_whatsapp_message(to, text):
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
     if request.method == 'GET':
+        # Verificación del webhook (sin cambios)
         if request.args.get('hub.mode') == 'subscribe' and request.args.get('hub.verify_token') == VERIFY_TOKEN:
             return request.args.get('hub.challenge'), 200
         else:
@@ -46,9 +69,7 @@ def webhook():
         data = request.get_json()
         print("Datos recibidos:", json.dumps(data, indent=2))
 
-        # --- Lógica para procesar el mensaje ---
         try:
-            # Nos aseguramos de que sea un mensaje de usuario y no una notificación de estado
             if (data.get('entry') and
                 data['entry'][0].get('changes') and
                 data['entry'][0]['changes'][0].get('value') and
@@ -56,16 +77,17 @@ def webhook():
                 
                 message_data = data['entry'][0]['changes'][0]['value']['messages'][0]
                 
-                # Verificamos que sea un mensaje de texto
                 if message_data.get('type') == 'text':
                     sender_phone = message_data['from']
                     message_text = message_data['text']['body']
 
                     print(f"Mensaje de {sender_phone}: '{message_text}'")
 
-                    # --- Aquí creamos el "eco" ---
-                    reply_text = f"Tú dijiste: {message_text}" # La respuesta del bot
+                    # --- ¡AQUÍ ESTÁ LA MAGIA! ---
+                    # En lugar del "eco", llamamos a la función de Gemini
+                    reply_text = get_gemini_response(message_text)
                     
+                    print(f"Respuesta de Gemini: '{reply_text}'")
                     print(f"Enviando respuesta a {sender_phone}...")
                     send_whatsapp_message(sender_phone, reply_text)
 
