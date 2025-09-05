@@ -25,7 +25,10 @@ except Exception as e:
     print(f"Error al configurar Gemini: {e}")
     model = None
 
-persistent_db_path = '/var/data/scheduler.db'
+persistent_data_dir = '/var/data'
+os.makedirs(persistent_data_dir, exist_ok=True)
+persistent_db_path = os.path.join(persistent_data_dir, 'scheduler.db')
+
 jobstores = {
     'default': SQLAlchemyJobStore(url=f'sqlite:///{persistent_db_path}')
 }
