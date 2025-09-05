@@ -5,7 +5,7 @@ import urllib.parse
 from flask import Flask, request
 from sqlalchemy import create_engine, Column, String, Text, DateTime
 from sqlalchemy.orm import sessionmaker, declarative_base
-from datetime import datetime
+from datetime import datetime, timedelta
 import google.generativeai as genai
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
@@ -89,21 +89,36 @@ def gemini_reply(user_message, user_id):
         return "Ocurrió un problema generando la respuesta."
 
 def parse_and_schedule_reminder(user_id, text):
-    cleaned = text.lower().replace("recuérdame", "").replace("recuerdame", "").strip()
-    parsed_date = dateparser.parse(
-        cleaned,
-        settings={
-            "PREFER_DATES_FROM": "future",
-            "TIMEZONE": "America/Bogota",
-            "RETURN_AS_TIMEZONE_AWARE": True,
-        },
-    )
-    if not parsed_date:
-        return "No pude entender la fecha y hora del recordatorio. Ejemplo: 'Recuérdame en 5 minutos botar la basura'."
-    if parsed_date.tzinfo is None:
-        parsed_date = pytz.timezone("America/Bogota").localize(parsed_date)
-    scheduler.add_job(send_whatsapp_message, "date", run_date=parsed_date, args=[user_id, f"¡RECORDATORIO! {cleaned}"])
-    return f"Listo. Te lo recordaré el {parsed_date.strftime('%d/%m %H:%M')}."
+    try:
+        cleaned = text.lower().replace("recuérdame", "").replace("recuerdame", "").strip()
+        parsed_date = dateparser.parse(
+            cleaned,
+            settings={
+                "PREFER_DATES_FROM": "future",
+                "TIMEZONE": "America/Bogota",
+                "RETURN_AS_TIMEZONE_AWARE": True,
+            },
+        )
+        if not parsed_date:
+            return "No pude entender la fecha y hora del recordatorio. Ejemplo: 'Recuérdame en 5 minutos botar la basura'."
+
+        # Si es algo del estilo "el 15 de octubre a las 4pm"
+        now = datetime.now(pytz.timezone("America/Bogota"))
+        if parsed_date > now + timedelta(hours=2):  
+            reminder_time = parsed_date - timedelta(hours=1)
+            task = cleaned.replace(parsed_date.strftime("%I:%M %p").lower(), "").strip()
+            scheduler.add_job(send_whatsapp_message, "date", run_date=reminder_time,
+                              args=[user_id, f"¡RECORDATORIO! Falta 1 hora para: {task}"])
+            return f"Perfecto. Te avisaré 1 hora antes de {task} el {parsed_date.strftime('%d/%m %H:%M')}."
+        else:
+            # Recordatorios cortos (ej: en 5 minutos)
+            scheduler.add_job(send_whatsapp_message, "date", run_date=parsed_date,
+                              args=[user_id, f"¡RECORDATORIO! {cleaned}"])
+            return f"Listo. Te lo recordaré el {parsed_date.strftime('%d/%m %H:%M')}."
+    except Exception as e:
+        print(f"Error en parse_and_schedule_reminder: {e}")
+        return "Tu recordatorio no se pudo programar. Intenta con un formato distinto."
+
 
 def search_youtube(query):
     q = urllib.parse.quote(query)
