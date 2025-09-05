@@ -11,7 +11,6 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 import dateparser
 import pytz
-import re
 
 app = Flask(__name__)
 
@@ -50,7 +49,7 @@ genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 WHITELIST = {
-    "573028432451"  #Colocar , para los números permitidos.
+    "573001112233"  #Si desea agregar otro número, agréguelo aquí con el código de país.
 }
 FALLBACK_MESSAGE = "Lo siento, cambié de número, escríbeme al wa.me/573028432451 Gracias."
 
@@ -92,30 +91,6 @@ def gemini_reply(user_message, user_id):
 
 def parse_and_schedule_reminder(user_id, text):
     cleaned = text.lower().replace("recuérdame", "").replace("recuerdame", "").strip()
-
-    # Caso 1: "en X minutos/horas/días"
-    relative_match = re.match(r"en (\d+)\s*(minuto|minutos|hora|horas|día|días)", cleaned)
-    if relative_match:
-        cantidad = int(relative_match.group(1))
-        unidad = relative_match.group(2)
-
-        if "minuto" in unidad:
-            run_date = datetime.now(pytz.timezone("America/Bogota")) + timedelta(minutes=cantidad)
-        elif "hora" in unidad:
-            run_date = datetime.now(pytz.timezone("America/Bogota")) + timedelta(hours=cantidad)
-        elif "día" in unidad:
-            run_date = datetime.now(pytz.timezone("America/Bogota")) + timedelta(days=cantidad)
-        else:
-            return "No entendí el intervalo de tiempo."
-
-        tarea = cleaned.replace(relative_match.group(0), "").strip()
-        if not tarea:
-            tarea = "¡RECORDATORIO!"
-
-        scheduler.add_job(send_whatsapp_message, "date", run_date=run_date, args=[user_id, f"¡RECORDATORIO! {tarea}"])
-        return f"Listo. Te lo recordaré el {run_date.strftime('%d/%m %H:%M')}."
-
-    # Caso 2: fecha/hora absoluta → recordatorio UNA HORA ANTES
     parsed_date = dateparser.parse(
         cleaned,
         settings={
@@ -124,20 +99,12 @@ def parse_and_schedule_reminder(user_id, text):
             "RETURN_AS_TIMEZONE_AWARE": True,
         },
     )
-
     if not parsed_date:
         return "No pude entender la fecha y hora del recordatorio. Ejemplo: 'Recuérdame en 5 minutos botar la basura'."
-
     if parsed_date.tzinfo is None:
         parsed_date = pytz.timezone("America/Bogota").localize(parsed_date)
-
-    run_date = parsed_date - timedelta(hours=1)
-    if run_date < datetime.now(pytz.timezone("America/Bogota")):
-        run_date = parsed_date  # si ya pasó la hora de "1h antes", recuerda a la hora exacta
-
-    tarea = cleaned.replace(parsed_date.strftime("%H:%M"), "").strip()
-    scheduler.add_job(send_whatsapp_message, "date", run_date=run_date, args=[user_id, f"¡RECORDATORIO! {tarea}"])
-    return f"Perfecto. Te lo recordaré el {run_date.strftime('%d/%m %H:%M')} (una hora antes de lo indicado)."
+    scheduler.add_job(send_whatsapp_message, "date", run_date=parsed_date, args=[user_id, f"¡RECORDATORIO! {cleaned}"])
+    return f"Listo. Te lo recordaré el {parsed_date.strftime('%d/%m %H:%M')}."
 
 def search_youtube(query):
     q = urllib.parse.quote(query)
@@ -181,6 +148,38 @@ def webhook():
                         save_message(user_id, "model", reply)
                         send_whatsapp_message(user_id, reply)
     return "EVENT_RECEIVED", 200
+
+def parse_and_schedule_reminder(user_id, text):
+    try:
+        cleaned = text.lower().replace("recuérdame", "").replace("recuerdame", "").strip()
+        parsed_date = dateparser.parse(
+            cleaned,
+            settings={
+                "PREFER_DATES_FROM": "future",
+                "TIMEZONE": "America/Bogota",
+                "RETURN_AS_TIMEZONE_AWARE": True,
+            },
+        )
+        if not parsed_date:
+            return "No pude entender la fecha y hora del recordatorio. Ejemplo: 'Recuérdame en 5 minutos botar la basura'."
+
+        # Si es algo del estilo "el 15 de octubre a las 4pm"
+        now = datetime.now(pytz.timezone("America/Bogota"))
+        if parsed_date > now + timedelta(hours=2):  
+            reminder_time = parsed_date - timedelta(hours=1)
+            task = cleaned.replace(parsed_date.strftime("%I:%M %p").lower(), "").strip()
+            scheduler.add_job(send_whatsapp_message, "date", run_date=reminder_time,
+                              args=[user_id, f"¡RECORDATORIO! Falta 1 hora para: {task}"])
+            return f"Perfecto. Te avisaré 1 hora antes de {task} el {parsed_date.strftime('%d/%m %H:%M')}."
+        else:
+            # Recordatorios cortos (ej: en 5 minutos)
+            scheduler.add_job(send_whatsapp_message, "date", run_date=parsed_date,
+                              args=[user_id, f"¡RECORDATORIO! {cleaned}"])
+            return f"Listo. Te lo recordaré el {parsed_date.strftime('%d/%m %H:%M')}."
+    except Exception as e:
+        print(f"Error en parse_and_schedule_reminder: {e}")
+        return "Tu recordatorio no se pudo programar. Intenta con un formato distinto."
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
