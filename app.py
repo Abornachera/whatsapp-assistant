@@ -1,15 +1,11 @@
 import os
 import uuid
 import requests
-import urllib.parse
 from flask import Flask, request
 from sqlalchemy import create_engine, Column, String, Text, DateTime
 from sqlalchemy.orm import sessionmaker, declarative_base
-from datetime import datetime, timedelta
+from datetime import datetime
 import google.generativeai as genai
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
-import dateparser
 import pytz
 
 app = Flask(__name__)
@@ -37,18 +33,10 @@ class Conversation(Base):
 
 Base.metadata.create_all(engine)
 
-jobstores = {"default": SQLAlchemyJobStore(url=DATABASE_URL)}
-scheduler = BackgroundScheduler(
-    jobstores=jobstores,
-    timezone=pytz.timezone("America/Bogota"),
-    job_defaults={"misfire_grace_time": 3600}
-)
-scheduler.start()
-
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash")
 
-WHITELIST = set(os.getenv("WHITELIST", "").split(","))
+WHITELIST = {num.strip() for num in os.getenv("WHITELIST", "").split(",") if num.strip()}
 
 FALLBACK_MESSAGE = "Lo siento, cambié de número, escríbeme al wa.me/573028432451 Gracias."
 
@@ -88,65 +76,6 @@ def gemini_reply(user_message, user_id):
         print(f"Error Gemini: {e}")
         return "Ocurrió un problema generando la respuesta."
 
-def parse_and_schedule_reminder(user_id, text):
-    try:
-        cleaned = (
-            text.lower()
-            .replace("recuérdame", "")
-            .replace("recuerdame", "")
-            .strip()
-        )
-
-        # Intentamos detectar la fecha/hora desde el mensaje
-        parsed_date = dateparser.parse(
-            cleaned,
-            languages=["es"],
-            settings={
-                "PREFER_DATES_FROM": "future",
-                "TIMEZONE": "America/Bogota",
-                "RETURN_AS_TIMEZONE_AWARE": True,
-                "RELATIVE_BASE": datetime.now(pytz.timezone("America/Bogota")),
-            },
-        )
-
-        if not parsed_date:
-            return (
-                "No pude entender la fecha y hora del recordatorio. "
-                "Ejemplo: 'Recuérdame en 5 minutos botar la basura'."
-            )
-
-        now = datetime.now(pytz.timezone("America/Bogota"))
-
-        if parsed_date > now + timedelta(hours=2):
-            # Recordatorio largo: avisar 1 hora antes
-            reminder_time = parsed_date - timedelta(hours=1)
-            task = cleaned
-            scheduler.add_job(
-                send_whatsapp_message,
-                "date",
-                run_date=reminder_time,
-                args=[user_id, f"¡RECORDATORIO! Falta 1 hora para: {task}"],
-            )
-            return f"Perfecto. Te avisaré 1 hora antes de '{task}' el {parsed_date.strftime('%d/%m %H:%M')}."
-        else:
-            # Recordatorio corto
-            scheduler.add_job(
-                send_whatsapp_message,
-                "date",
-                run_date=parsed_date,
-                args=[user_id, f"¡RECORDATORIO! {cleaned}"],
-            )
-            return f"Listo. Te lo recordaré el {parsed_date.strftime('%d/%m %H:%M')}."
-
-    except Exception as e:
-        print(f"Error en parse_and_schedule_reminder: {e}")
-        return "Tu recordatorio no se pudo programar. Intenta con un formato distinto."
-
-
-def search_youtube(query):
-    q = urllib.parse.quote(query)
-    return f"Aquí tienes los resultados para '{query}':\nhttps://www.youtube.com/results?search_query={q}"
-
 @app.route("/webhook", methods=["GET"])
 def verify_webhook():
     mode = request.args.get("hub.mode")
@@ -172,14 +101,7 @@ def webhook():
                             send_whatsapp_message(user_id, FALLBACK_MESSAGE)
                             continue
 
-                        lower = body.lower()
-                        if lower.startswith("recuérdame") or lower.startswith("recuerdame"):
-                            reply = parse_and_schedule_reminder(user_id, body)
-                        elif lower.startswith("youtube") or lower.startswith("busca en youtube"):
-                            query = lower.replace("busca en youtube", "").replace("youtube", "").strip()
-                            reply = search_youtube(query)
-                        else:
-                            reply = gemini_reply(body, user_id)
+                        reply = gemini_reply(body, user_id)
 
                         save_message(user_id, "user", body)
                         save_message(user_id, "model", reply)
