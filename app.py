@@ -49,7 +49,7 @@ genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 WHITELIST = {
-    "573001112233"  #Si desea agregar otro número, agréguelo aquí con el código de país.
+    "573028432451"  # Anderson
 }
 FALLBACK_MESSAGE = "Lo siento, cambié de número, escríbeme al wa.me/573028432451 Gracias."
 
@@ -148,7 +148,6 @@ def webhook():
                         save_message(user_id, "model", reply)
                         send_whatsapp_message(user_id, reply)
     return "EVENT_RECEIVED", 200
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
