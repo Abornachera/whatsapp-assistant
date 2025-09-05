@@ -16,8 +16,8 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 try:
     genai.configure(api_key=GEMINI_API_KEY)
     # --- LA LÍNEA CORREGIDA ESTÁ AQUÍ ---
-    model = genai.GenerativeModel('gemini-2.5-flash-latest')
-    print("Gemini configurado correctamente con el modelo gemini-2.5-flash-latest.")
+    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+    print("Gemini configurado correctamente con el modelo gemini-1.5-flash-latest.")
 except Exception as e:
     print(f"Error al configurar Gemini: {e}")
     model = None
