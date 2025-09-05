@@ -48,9 +48,8 @@ scheduler.start()
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash")
 
-WHITELIST = {
-    "573028432451"  # Anderson
-}
+WHITELIST = set(os.getenv("WHITELIST", "").split(","))
+
 FALLBACK_MESSAGE = "Lo siento, cambié de número, escríbeme al wa.me/573028432451 Gracias."
 
 def send_whatsapp_message(to, text):
