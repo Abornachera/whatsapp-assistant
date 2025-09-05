@@ -1,8 +1,8 @@
-Flask==3.0.3
-requests==2.32.3
-google-generativeai==0.7.2
-SQLAlchemy==2.0.32
-psycopg2-binary==2.9.9
-APScheduler==3.10.4
-python-dateparser==1.2.0
-gunicorn==23.0.0
+Flask
+gunicorn
+requests
+google-generativeai
+APScheduler
+dateparser
+SQLAlchemy
+psycopg2-binary
