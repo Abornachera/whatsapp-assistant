@@ -38,11 +38,20 @@ class Conversation(Base):
 Base.metadata.create_all(engine)
 
 jobstores = {"default": SQLAlchemyJobStore(url=DATABASE_URL)}
-scheduler = BackgroundScheduler(jobstores=jobstores, timezone=pytz.timezone("America/Bogota"), job_defaults={"misfire_grace_time": 3600})
+scheduler = BackgroundScheduler(
+    jobstores=jobstores,
+    timezone=pytz.timezone("America/Bogota"),
+    job_defaults={"misfire_grace_time": 3600}
+)
 scheduler.start()
 
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash")
+
+WHITELIST = {
+    "573028432451"  #Colocar , para los números permitidos.
+}
+FALLBACK_MESSAGE = "Lo siento, cambié de número, escríbeme al wa.me/573028432451 Gracias."
 
 def send_whatsapp_message(to, text):
     url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
@@ -121,23 +130,23 @@ def webhook():
                     if message.get("type") == "text":
                         user_id = message["from"]
                         body = message["text"]["body"]
+
+                        if user_id not in WHITELIST:
+                            send_whatsapp_message(user_id, FALLBACK_MESSAGE)
+                            continue
+
                         lower = body.lower()
                         if lower.startswith("recuérdame") or lower.startswith("recuerdame"):
                             reply = parse_and_schedule_reminder(user_id, body)
-                            save_message(user_id, "user", body)
-                            save_message(user_id, "model", reply)
-                            send_whatsapp_message(user_id, reply)
                         elif lower.startswith("youtube") or lower.startswith("busca en youtube"):
                             query = lower.replace("busca en youtube", "").replace("youtube", "").strip()
                             reply = search_youtube(query)
-                            save_message(user_id, "user", body)
-                            save_message(user_id, "model", reply)
-                            send_whatsapp_message(user_id, reply)
                         else:
-                            save_message(user_id, "user", body)
                             reply = gemini_reply(body, user_id)
-                            save_message(user_id, "model", reply)
-                            send_whatsapp_message(user_id, reply)
+
+                        save_message(user_id, "user", body)
+                        save_message(user_id, "model", reply)
+                        send_whatsapp_message(user_id, reply)
     return "EVENT_RECEIVED", 200
 
 if __name__ == "__main__":
