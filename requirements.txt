@@ -5,3 +5,4 @@ google-generativeai
 APScheduler
 dateparser
 SQLAlchemy
+psycopg2-binary

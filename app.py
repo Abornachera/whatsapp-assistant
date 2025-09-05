@@ -14,6 +14,7 @@ ACCESS_TOKEN = os.environ.get('ACCESS_TOKEN')
 PHONE_NUMBER_ID = os.environ.get('PHONE_NUMBER_ID')
 VERIFY_TOKEN = os.environ.get('VERIFY_TOKEN')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
 AUTHORIZED_NUMBERS = {'573028432451'}
 
@@ -25,16 +26,12 @@ except Exception as e:
     print(f"Error al configurar Gemini: {e}")
     model = None
 
-persistent_data_dir = '/var/data'
-os.makedirs(persistent_data_dir, exist_ok=True)
-persistent_db_path = os.path.join(persistent_data_dir, 'scheduler.db')
-
 jobstores = {
-    'default': SQLAlchemyJobStore(url=f'sqlite:///{persistent_db_path}')
+    'default': SQLAlchemyJobStore(url=DATABASE_URL)
 }
 scheduler = BackgroundScheduler(jobstores=jobstores)
 scheduler.start()
-print(f"Scheduler iniciado. Tareas guardadas en: {persistent_db_path}")
+print("Scheduler iniciado y conectado a la base de datos externa.")
 
 def send_whatsapp_message(to, text):
     print(f"Intentando enviar mensaje a {to}: '{text}'")
@@ -68,16 +65,16 @@ def search_youtube(query):
 def handle_reminder(message, sender_phone):
     task_and_time_str = message.lower().replace('recuérdame', '').replace('recuerdame', '').strip()
     parsed_date = dateparser.parse(task_and_time_str, settings={'PREFER_DATES_FROM': 'future', 'TIMEZONE': 'America/Bogota'})
-    
+
     if not parsed_date:
         return "No pude entender la fecha y hora para el recordatorio. Intenta ser más específico, por ejemplo: 'recuérdame comprar pan mañana a las 5 pm'."
 
     task = task_and_time_str.replace(parsed_date.strftime('%H:%M'), '').replace(parsed_date.strftime('%I:%M %p'), '').strip()
 
     scheduler.add_job(send_whatsapp_message, 'date', run_date=parsed_date, args=[sender_phone, f"¡RECORDATORIO! ✨\n\n{task}"])
-    
+
     print(f"Recordatorio programado para {sender_phone} en la fecha {parsed_date}: {task}")
-    
+
     return f"¡Entendido! Te recordaré '{task}' el {parsed_date.strftime('%d de %B a las %I:%M %p')}."
 
 @app.route('/webhook', methods=['GET', 'POST'])
@@ -97,17 +94,17 @@ def webhook():
                 data['entry'][0].get('changes') and
                 data['entry'][0]['changes'][0].get('value') and
                 data['entry'][0]['changes'][0]['value'].get('messages')):
-                
+
                 message_data = data['entry'][0]['changes'][0]['value']['messages'][0]
-                
+
                 if message_data.get('type') == 'text':
                     sender_phone = message_data['from']
                     message_text = message_data['text']['body']
-                    
+
                     if sender_phone in AUTHORIZED_NUMBERS:
                         message_lower = message_text.lower()
                         reply_text = ""
-                        
+
                         if message_lower.startswith('recuérdame') or message_lower.startswith('recuerdame'):
                             reply_text = handle_reminder(message_text, sender_phone)
                         elif message_lower.startswith('youtube') or message_lower.startswith('busca en youtube'):
@@ -124,7 +121,7 @@ def webhook():
 
         except Exception as e:
             print(f"Ocurrió un error al procesar el mensaje: {e}")
-        
+
         return 'OK', 200
 
 if __name__ == "__main__":
