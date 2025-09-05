@@ -7,10 +7,11 @@ import urllib.parse
 import dateparser
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
-from sqlalchemy import create_engine, Column, String, Text, DateTime, func
+from sqlalchemy import create_engine, Column, String, Text, DateTime
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.exc import SQLAlchemyError
 import datetime
+import uuid
 
 app = Flask(__name__)
 
@@ -29,7 +30,7 @@ Base = declarative_base()
 
 class ConversationHistory(Base):
     __tablename__ = 'conversation_history'
-    id = Column(String, primary_key=True, default=lambda: os.urandom(16).hex())
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     sender_phone = Column(String, nullable=False)
     role = Column(String, nullable=False)
     content = Column(Text, nullable=False)
@@ -90,10 +91,11 @@ def send_whatsapp_message(to, text):
         return None
 
 def get_gemini_response_with_history(prompt, history):
-    if not model: return "Error: El modelo de IA no está configurado."
+    if not model:
+        return "Error: El modelo de IA no está configurado."
     try:
-        chat = model.start_chat(history=history)
-        response = chat.send_message(prompt)
+        messages = history + [{"role": "user", "parts": [prompt]}]
+        response = model.generate_content(messages)
         return response.text
     except Exception as e:
         print(f"Error al generar contenido con Gemini: {e}")
@@ -107,10 +109,8 @@ def search_youtube(query):
 def handle_reminder(message, sender_phone):
     task_and_time_str = message.lower().replace('recuérdame', '').replace('recuerdame', '').strip()
     parsed_date = dateparser.parse(task_and_time_str, settings={'PREFER_DATES_FROM': 'future', 'TIMEZONE': 'America/Bogota'})
-    
     if not parsed_date:
         return "No pude entender la fecha y hora para el recordatorio."
-    
     task = task_and_time_str.replace(parsed_date.strftime('%H:%M'), '').replace(parsed_date.strftime('%I:%M %p'), '').strip()
     scheduler.add_job(send_whatsapp_message, 'date', run_date=parsed_date, args=[sender_phone, f"¡RECORDATORIO! ✨\n\n{task}"])
     print(f"Recordatorio programado para {sender_phone} en la fecha {parsed_date}: {task}")
@@ -123,7 +123,6 @@ def webhook():
             return request.args.get('hub.challenge'), 200
         else:
             return 'Verification token mismatch', 403
-
     if request.method == 'POST':
         data = request.get_json()
         try:
@@ -131,17 +130,13 @@ def webhook():
                 data['entry'][0].get('changes') and
                 data['entry'][0]['changes'][0].get('value') and
                 data['entry'][0]['changes'][0]['value'].get('messages')):
-                
                 message_data = data['entry'][0]['changes'][0]['value']['messages'][0]
-                
                 if message_data.get('type') == 'text':
                     sender_phone = message_data['from']
                     message_text = message_data['text']['body']
-                        
                     if sender_phone in AUTHORIZED_NUMBERS:
                         message_lower = message_text.lower()
                         reply_text = ""
-                        
                         if message_lower.startswith('recuérdame') or message_lower.startswith('recuerdame'):
                             reply_text = handle_reminder(message_text, sender_phone)
                         elif message_lower.startswith('youtube') or message_lower.startswith('busca en youtube'):
@@ -151,14 +146,12 @@ def webhook():
                             history = get_conversation_history(sender_phone)
                             reply_text = get_gemini_response_with_history(message_text, history)
                             add_to_history(sender_phone, message_text, reply_text)
-                        
                         send_whatsapp_message(sender_phone, reply_text)
                     else:
-                        rejection_message = "Hola. He cambiado de número, por favor contáctame a mi nuevo WhatsApp: [Tu Nuevo Número Aquí]"
+                        rejection_message = "Hola. He cambiado de número, por favor contáctame a mi nuevo WhatsApp: wa.me/3028432451 ¡Gracias!"
                         send_whatsapp_message(sender_phone, rejection_message)
         except Exception as e:
             print(f"Ocurrió un error al procesar el mensaje: {e}")
-        
         return 'OK', 200
 
 if __name__ == "__main__":
